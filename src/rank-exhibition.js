@@ -160,6 +160,7 @@ const html = `<!doctype html>
 <meta charset="utf-8" />
 <title>${pageTitle} — 수수료 계산기</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="referrer" content="no-referrer" />
 <style>
   :root {
     --bg: #0a0a0a;
