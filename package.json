@@ -1,0 +1,24 @@
+{
+  "name": "kream-event-monitor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "크림(KREAM) 신규 이벤트/기획전 모니터링 후 카카오톡 '나에게 보내기'로 알림",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.js",
+    "scrape": "node src/scrape.js",
+    "rank": "node src/rank-exhibition.js",
+    "rank:edge": "node -e \"process.env.USE_EDGE='1';import('./src/rank-exhibition.js')\"",
+    "login": "node src/login-and-save.js",
+    "login:edge": "node -e \"process.env.USE_EDGE='1';import('./src/login-and-save.js')\"",
+    "test-notify": "node src/test-notify.js",
+    "get-chat-id": "node src/get-chat-id.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
