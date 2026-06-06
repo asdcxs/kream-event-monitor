@@ -371,9 +371,38 @@ const html = `<!doctype html>
     padding: 16px 32px;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .ctrl-pick select { font-size: 15px; padding: 10px 12px; font-weight: 600; }
+  .adv-panel {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--card);
+    overflow: hidden;
+  }
+  .adv-summary {
+    list-style: none;
+    cursor: pointer;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    user-select: none;
+  }
+  .adv-summary::-webkit-details-marker { display: none; }
+  .adv-sub { color: var(--dim); font-weight: 400; font-size: 11.5px; margin-left: 4px; }
+  .adv-chevron { color: var(--muted); transition: transform 0.15s; }
+  .adv-panel[open] .adv-chevron { transform: rotate(180deg); }
+  .adv-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 14px;
+    padding: 4px 14px 16px;
     align-items: end;
   }
   .ctrl label {
@@ -579,20 +608,20 @@ const html = `<!doctype html>
     .benefits, .summary { padding: 12px 14px; }
     main { padding: 12px 14px 100px; }
 
-    /* 컨트롤: 모바일에선 2열 그리드, 입력 큼직하게 */
-    .controls {
-      padding: 14px;
+    /* 컨트롤: 모바일에선 설정 접기 + 2열 그리드, 입력 큼직하게 */
+    .controls { padding: 12px 14px; }
+    .adv-grid {
       grid-template-columns: 1fr 1fr;
       gap: 12px 10px;
     }
-    .ctrl-wide { grid-column: 1 / -1; }
     .ctrl-fees { grid-column: 1 / -1; }
     .ctrl.toggle { grid-column: span 1; }
     .ctrl input, .ctrl select {
       font-size: 16px;  /* iOS 자동 줌 방지 */
-      padding: 11px 12px;
+      padding: 12px;
       border-radius: 8px;
     }
+    .ctrl-pick select { font-size: 16px; padding: 13px 12px; }
     .ctrl label { font-size: 11px; margin-bottom: 5px; }
     .fees-fixed { font-size: 14px; padding: 11px 12px; }
 
@@ -653,52 +682,59 @@ const html = `<!doctype html>
 </section>
 
 <div class="controls">
-  <div class="ctrl ctrl-wide">
+  <div class="ctrl ctrl-pick">
     <label>결제 혜택 선택</label>
     <select id="benefitSelect"></select>
     <small id="benefitHint">드롭다운 변경 시 아래 값이 자동 적용됩니다</small>
   </div>
-  <div class="ctrl ctrl-fees">
-    <label>수수료 <span class="lock-badge">🔒 고정</span></label>
-    <div class="fees-fixed">
-      <span>매수 <b>2.3%</b></span>
-      <span>매도 <b>0.55%</b></span>
+  <details class="adv-panel" id="ctrlPanel">
+    <summary class="adv-summary">
+      <span>⚙️ 계산 설정 <span class="adv-sub">수수료 · 카드 · 정렬 · 필터</span></span>
+      <span class="adv-chevron">▾</span>
+    </summary>
+    <div class="adv-grid">
+      <div class="ctrl ctrl-fees">
+        <label>수수료 <span class="lock-badge">🔒 고정</span></label>
+        <div class="fees-fixed">
+          <span>매수 <b>2.3%</b></span>
+          <span>매도 <b>0.55%</b></span>
+        </div>
+        <input type="hidden" id="buyFeeRate" value="2.3" />
+        <input type="hidden" id="sellFeeRate" value="0.55" />
+      </div>
+      <div class="ctrl edit">
+        <label>카드 할인율 (%)</label>
+        <input type="number" id="cardRate" value="4" step="0.1" min="0" inputmode="decimal" />
+        <small>0이면 정액 할인</small>
+      </div>
+      <div class="ctrl edit">
+        <label>할인 한도/금액 (원)</label>
+        <input type="number" id="cardCap" value="30000" step="1000" min="0" inputmode="numeric" />
+      </div>
+      <div class="ctrl edit">
+        <label>최소 결제 (원)</label>
+        <input type="number" id="minAmount" value="0" step="10000" min="0" inputmode="numeric" />
+        <small>미달 시 혜택 없음</small>
+      </div>
+      <div class="ctrl">
+        <label>정렬</label>
+        <select id="sortBy">
+          <option value="profit">순이익 큰 순</option>
+          <option value="volume">거래량 큰 순</option>
+          <option value="price-desc">가격 높은 순</option>
+          <option value="price-asc">가격 낮은 순</option>
+        </select>
+      </div>
+      <div class="ctrl toggle">
+        <div class="switch on" id="hideSizedSwitch" role="checkbox" aria-checked="true"></div>
+        <label class="switch-label" for="hideSizedSwitch" onclick="document.getElementById('hideSizedSwitch').click()">사이즈 매물 숨기기</label>
+      </div>
+      <div class="ctrl toggle">
+        <div class="switch on" id="hideLossSwitch" role="checkbox" aria-checked="true"></div>
+        <label class="switch-label" for="hideLossSwitch" onclick="document.getElementById('hideLossSwitch').click()">손실 상품 숨기기</label>
+      </div>
     </div>
-    <input type="hidden" id="buyFeeRate" value="2.3" />
-    <input type="hidden" id="sellFeeRate" value="0.55" />
-    <small>크림 기준 고정값</small>
-  </div>
-  <div class="ctrl edit">
-    <label>카드 할인율 (%)</label>
-    <input type="number" id="cardRate" value="4" step="0.1" min="0" inputmode="decimal" />
-    <small>0이면 정액 할인</small>
-  </div>
-  <div class="ctrl edit">
-    <label>할인 한도/금액 (원)</label>
-    <input type="number" id="cardCap" value="30000" step="1000" min="0" inputmode="numeric" />
-  </div>
-  <div class="ctrl edit">
-    <label>최소 결제 (원)</label>
-    <input type="number" id="minAmount" value="0" step="10000" min="0" inputmode="numeric" />
-    <small>미달 시 혜택 없음</small>
-  </div>
-  <div class="ctrl">
-    <label>정렬</label>
-    <select id="sortBy">
-      <option value="profit">순이익 큰 순</option>
-      <option value="volume">거래량 큰 순</option>
-      <option value="price-desc">가격 높은 순</option>
-      <option value="price-asc">가격 낮은 순</option>
-    </select>
-  </div>
-  <div class="ctrl toggle">
-    <div class="switch on" id="hideSizedSwitch" role="checkbox" aria-checked="true"></div>
-    <label class="switch-label" for="hideSizedSwitch" onclick="document.getElementById('hideSizedSwitch').click()">사이즈 매물 숨기기</label>
-  </div>
-  <div class="ctrl toggle">
-    <div class="switch on" id="hideLossSwitch" role="checkbox" aria-checked="true"></div>
-    <label class="switch-label" for="hideLossSwitch" onclick="document.getElementById('hideLossSwitch').click()">손실 상품 숨기기</label>
-  </div>
+  </details>
 </div>
 
 <div class="summary" id="summary"></div>
@@ -720,7 +756,7 @@ function discountForBenefit(price, b, inp) {
   if (!price) return 0;
   if (b.benefitType === 'percent') {
     if (b.minAmount && price < b.minAmount) return 0;
-    const cap = inp.cardCap || Infinity;
+    const cap = b.cap || inp.cardCap || Infinity; // 혜택 자체 캡 우선 (예: 현대 3% 최대 25,000)
     return Math.min(Math.floor(price * (b.percent / 100)), cap);
   }
   if (b.benefitType === 'tiered') {
@@ -770,7 +806,7 @@ function readInputs() {
 // 혜택의 대표 카드 파라미터 (직접입력 필드 채우기용)
 function benefitToParams(b) {
   if (b.benefitType === 'percent') {
-    return { cardRate: b.percent || 0, cardCap: 30000, minAmount: b.minAmount || 0 };
+    return { cardRate: b.percent || 0, cardCap: b.cap || 30000, minAmount: b.minAmount || 0 };
   }
   if (b.benefitType === 'tiered') {
     const maxAmt = (b.tiers || []).reduce((m, t) => Math.max(m, t.amount), 0);
@@ -791,7 +827,7 @@ function benefitMethodName(b) {
 function benefitLabel(b) {
   const name = benefitMethodName(b);
   let amt = '';
-  if (b.benefitType === 'percent') amt = (b.percent || 0) + '%';
+  if (b.benefitType === 'percent') amt = (b.percent || 0) + '%' + (b.cap ? \` 최대\${(b.cap/10000>=1?(b.cap/10000)+'만':(b.cap/1000)+'천')}\` : '');
   else if (b.benefitType === 'tiered') {
     const maxAmt = (b.tiers || []).reduce((m, t) => Math.max(m, t.amount), 0);
     amt = '최대 ' + maxAmt.toLocaleString() + '원';
@@ -848,7 +884,7 @@ function updateBenefitHint() {
   if (b.benefitType === 'tiered') {
     hint.innerHTML = '구간별: ' + (b.tiers || []).map((t) => \`\${(t.threshold/10000).toFixed(0)}만→\${(t.amount/10000)>=1?(t.amount/10000)+'만':(t.amount/1000)+'천'}\`).join(' / ') + (b.totalCount ? \` (총 \${b.totalCount}회)\` : '');
   } else if (b.benefitType === 'percent') {
-    hint.textContent = \`정률 \${b.percent}% (한도 \${(parseFloat($('cardCap').value)||0).toLocaleString()}원) — 상품별 자동 계산\`;
+    hint.textContent = \`정률 \${b.percent}%\${b.cap ? ' · 최대 '+b.cap.toLocaleString()+'원' : ''}\${b.minAmount ? ' · '+(b.minAmount/10000).toFixed(0)+'만원 이상' : ''} — 상품별 자동 계산\`;
   } else {
     hint.textContent = \`정액 \${(b.flatAmount||0).toLocaleString()}원\${b.minAmount? ' · '+(b.minAmount/10000).toFixed(0)+'만원 이상':''}\`;
   }
@@ -928,7 +964,7 @@ function renderBenefits() {
 
     // 상단 우측 요약 값
     let rateText = '';
-    if (bt === 'percent') rateText = \`\${b.percent}%\`;
+    if (bt === 'percent') rateText = \`\${b.percent}%\`;  // 캡은 본문에 표시
     else if (bt === 'flat') rateText = \`\${(b.flatAmount || 0).toLocaleString()}원\`;
     else if (bt === 'tiered') rateText = \`최대 \${((b.tiers||[]).reduce((m,t)=>Math.max(m,t.amount),0)).toLocaleString()}\`;
     else rateText = '이벤트';
@@ -941,7 +977,8 @@ function renderBenefits() {
         return \`<div class="b-tier"><span>\${(t.threshold/10000).toFixed(0)}만↑</span><b>\${amtTxt}원</b></div>\`;
       }).join('') + '</div>';
     } else if (bt === 'percent') {
-      bodyHtml = \`<div class="b-cond">\${b.minAmount ? (b.minAmount/10000).toFixed(0)+'만원 이상' : '금액 무관'} · 정률 할인</div>\`;
+      const capTxt = b.cap ? \` · 최대 \${b.cap.toLocaleString()}원\` : '';
+      bodyHtml = \`<div class="b-cond">\${b.minAmount ? (b.minAmount/10000).toFixed(0)+'만원 이상' : '금액 무관'}\${capTxt}</div>\`;
     } else if (bt === 'flat') {
       bodyHtml = \`<div class="b-cond">\${b.minAmount ? (b.minAmount/10000).toFixed(0)+'만원 이상' : ''} 정액 할인</div>\`;
     } else {
@@ -993,11 +1030,21 @@ function render() {
   const maxProfit = profitable.length ? Math.max(...profitable.map((e) => e.calc.profit)) : 0;
   const hiddenCount = DATA.length - filtered.length;
 
+  // 참여 한도(회) 반영: 단건 최대이익 × 가능 횟수 = 최대 누적이익
+  const maxCount = selectedBenefit ? (selectedBenefit.totalCount || selectedBenefit.participation || 1) : 1;
+  const topN = profitable.map((e) => e.calc.profit).sort((a, b) => b - a).slice(0, maxCount);
+  const stackProfit = topN.reduce((s, v) => s + v, 0);
+  const countNote = maxCount > 1
+    ? \`<span class="pos">최대 \${maxCount}회 누적 <strong>\${fmt(stackProfit)}</strong></span>\`
+    : '';
+
+  const hiddenNote = hiddenCount > 0 ? \`<span style="color:var(--dim)">(사이즈 \${hiddenCount} 숨김)</span>\` : '';
   $('summary').innerHTML = \`
-    <span><strong>\${enriched.length}</strong>개 표시 \${hiddenCount > 0 ? '<span style="color:var(--dim)">(사이즈 매물 ' + hiddenCount + '개 숨김)</span>' : ''}</span>
-    <span class="pos"><strong>\${profitable.length}</strong>개 이익 (합계 \${fmt(sumProfit)})</span>
+    <span><strong>\${enriched.length}</strong>개 \${hiddenNote}</span>
+    <span class="pos"><strong>\${profitable.length}</strong>개 이익</span>
     <span class="neg"><strong>\${losing.length}</strong>개 손실</span>
-    <span class="pos">최대 이익 <strong>\${fmt(maxProfit)}</strong></span>
+    <span class="pos">단건 최대 <strong>\${fmt(maxProfit)}</strong></span>
+    \${countNote}
   \`;
 
   $('grid').innerHTML = sorted.map((it, idx) => {
@@ -1047,6 +1094,10 @@ function render() {
     render();
   });
 });
+
+// 설정 패널: 데스크탑은 펼침, 모바일(<=640px)은 접힘
+const ctrlPanel = $('ctrlPanel');
+if (ctrlPanel) ctrlPanel.open = window.matchMedia('(min-width: 641px)').matches;
 
 initBenefitSelect();
 initDragScroll();

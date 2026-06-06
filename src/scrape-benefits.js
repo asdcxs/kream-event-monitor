@@ -34,6 +34,26 @@ function parseAmounts(text) {
   return [];
 }
 
+// "2만 5천원" / "3만원" / "5천원" / "25,000원" → 원 단위 정수
+function parseWon(s) {
+  if (!s) return 0;
+  let m = s.match(/(\d+)\s*만\s*(\d+)\s*천\s*원/);
+  if (m) return parseInt(m[1], 10) * 10000 + parseInt(m[2], 10) * 1000;
+  m = s.match(/(\d+)\s*만\s*원/);
+  if (m) return parseInt(m[1], 10) * 10000;
+  m = s.match(/(\d+)\s*천\s*원/);
+  if (m) return parseInt(m[1], 10) * 1000;
+  m = s.match(/([\d,]+)\s*원/);
+  if (m) return parseInt(m[1].replace(/,/g, ''), 10);
+  return 0;
+}
+
+// "주문당 최대 2만 5천원 제공" → 25000 (정률 할인 캡)
+function parseCap(text) {
+  const m = text.match(/(?:주문당|건당)?\s*최대\s*([\d만천,\s]+?원)\s*(?:제공|할인|적립)/);
+  return m ? parseWon(m[1]) : 0;
+}
+
 // 상세 페이지 본문 텍스트 → 혜택 타입/구간/참여횟수 분류
 function classifyBenefit(title, detailText) {
   const text = `${title}\n${detailText || ''}`;
@@ -47,6 +67,8 @@ function classifyBenefit(title, detailText) {
   const totalM = text.match(/총\s*(\d+)\s*회/);
   const participation = partM ? parseInt(partM[1], 10) : null;
   const totalCount = totalM ? parseInt(totalM[1], 10) : null;
+
+  const cap = parseCap(detailText || '');
 
   let type, tiers = [], flatAmount = null, percent = null, minAmount = null;
   if (pct) {
@@ -68,17 +90,23 @@ function classifyBenefit(title, detailText) {
     }
     minAmount = thresholds[0] || null;
   }
-  return { benefitType: type, tiers, flatAmount, percent, minAmountDetail: minAmount, participation, totalCount };
+  return { benefitType: type, tiers, flatAmount, percent, cap: cap || null, minAmountDetail: minAmount, participation, totalCount };
 }
 
 async function scrapeBenefitDetail(page, url) {
   try {
     await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
-    await page.waitForTimeout(4500);
+    // "제공/참여/할인" 같은 본문 키워드가 뜰 때까지 대기 (최대 9초)
+    try {
+      await page.waitForFunction(
+        () => /제공|참여|할인|적립|이상\s*결제/.test(document.body.innerText),
+        { timeout: 9000 }
+      );
+    } catch {}
+    await page.waitForTimeout(1500);
     return await page.evaluate(() => {
       const lines = document.body.innerText.split('\n').map((l) => l.trim()).filter(Boolean);
-      // 푸터/네비 제외하고 본문 상단부만
-      return lines.slice(0, 25).join('\n');
+      return lines.slice(0, 30).join('\n');
     });
   } catch {
     return '';
@@ -205,6 +233,8 @@ export async function scrapeBenefits() {
         if (prev.participation && !b.participation) b.participation = prev.participation;
         if (prev.totalCount && !b.totalCount) b.totalCount = prev.totalCount;
       }
+      // 캡은 가격 무관 — 캐시에 있으면 항상 보강
+      if (!b.cap && prev && prev.cap) b.cap = prev.cap;
     }
     await detailPage.close();
 
@@ -233,7 +263,7 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     if (b.payMethods.length) parts.push(b.payMethods.join('/'));
     if (b.cards.length) parts.push(b.cards.join('/'));
     parts.push(`[${b.benefitType}]`);
-    if (b.benefitType === 'percent') parts.push(`${b.percent}%`);
+    if (b.benefitType === 'percent') parts.push(`${b.percent}%${b.cap ? ` (최대 ${b.cap.toLocaleString()})` : ''}`);
     else if (b.benefitType === 'flat') parts.push(`${(b.flatAmount || 0).toLocaleString()}원`);
     else if (b.benefitType === 'tiered') parts.push(b.tiers.map((t) => `${t.threshold / 10000}만→${t.amount.toLocaleString()}`).join(' / '));
     if (b.participation) parts.push(`${b.participation}회${b.totalCount ? `(총${b.totalCount})` : ''}`);
