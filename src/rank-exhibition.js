@@ -377,6 +377,31 @@ const html = `<!doctype html>
   .ctrl small { display: block; color: var(--dim); font-size: 11px; margin-top: 4px; }
   .ctrl-wide { grid-column: span 2; }
   @media (max-width: 800px) { .ctrl-wide { grid-column: span 1; } }
+
+  /* 고정 수수료 표시 */
+  .lock-badge {
+    font-size: 9px;
+    color: var(--dim);
+    background: rgba(255,255,255,0.05);
+    padding: 1px 5px;
+    border-radius: 4px;
+    letter-spacing: 0;
+    margin-left: 4px;
+  }
+  .fees-fixed {
+    display: flex;
+    gap: 12px;
+    background: var(--card);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    color: var(--muted);
+  }
+  .fees-fixed b { color: var(--text); font-variant-numeric: tabular-nums; }
+  /* 편집 가능한 카드 필드 강조 */
+  .ctrl.edit input { border-color: rgba(0,208,102,0.35); }
+  .ctrl.edit label { color: var(--accent); }
   .ctrl.toggle {
     display: flex;
     align-items: center;
@@ -526,14 +551,58 @@ const html = `<!doctype html>
   .profit-row .val.pos { color: var(--accent); }
   .profit-row .val.neg { color: var(--neg); }
 
-  @media (max-width: 600px) {
-    header { padding: 20px 16px 14px; }
-    .benefits, .controls, .summary { padding: 14px 16px; }
-    main { padding: 14px; }
+  @media (max-width: 640px) {
+    header { padding: 18px 14px 12px; }
+    header h1 { font-size: 18px; }
+    header .meta { font-size: 11px; }
+    .benefits, .summary { padding: 12px 14px; }
+    main { padding: 12px 14px 100px; }
+
+    /* 컨트롤: 모바일에선 2열 그리드, 입력 큼직하게 */
+    .controls {
+      padding: 14px;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 10px;
+    }
+    .ctrl-wide { grid-column: 1 / -1; }
+    .ctrl-fees { grid-column: 1 / -1; }
+    .ctrl.toggle { grid-column: span 1; }
+    .ctrl input, .ctrl select {
+      font-size: 16px;  /* iOS 자동 줌 방지 */
+      padding: 11px 12px;
+      border-radius: 8px;
+    }
+    .ctrl label { font-size: 11px; margin-bottom: 5px; }
+    .fees-fixed { font-size: 14px; padding: 11px 12px; }
+
+    /* 상품 그리드: 2열 */
     .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
-    .body { padding: 10px; }
+    .body { padding: 11px; gap: 3px; }
+    .name-ko { font-size: 11.5px; min-height: 28px; }
     .price-main { font-size: 15px; }
-    .calc { font-size: 11px; }
+    .calc { font-size: 11px; gap: 1px 6px; }
+    .profit-row { font-size: 13px; }
+
+    /* 혜택 카드 살짝 작게 */
+    .benefit { flex: 0 0 200px; min-height: 100px; }
+    .benefits-tabs button { padding: 6px 10px; }
+
+    /* 요약을 하단 고정 바로 */
+    .summary {
+      position: sticky;
+      bottom: 0;
+      z-index: 5;
+      background: rgba(10,10,10,0.96);
+      backdrop-filter: blur(8px);
+      border-top: 1px solid var(--border);
+      gap: 12px;
+      font-size: 12px;
+      flex-wrap: wrap;
+    }
+    .summary strong { font-size: 14px; }
+  }
+  @media (max-width: 380px) {
+    .grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -568,28 +637,28 @@ const html = `<!doctype html>
     <select id="benefitSelect"></select>
     <small id="benefitHint">드롭다운 변경 시 아래 값이 자동 적용됩니다</small>
   </div>
-  <div class="ctrl">
-    <label>매수 수수료율 (%)</label>
-    <input type="number" id="buyFeeRate" value="2.3" step="0.05" min="0" />
-    <small>가격 × N% (올림)</small>
+  <div class="ctrl ctrl-fees">
+    <label>수수료 <span class="lock-badge">🔒 고정</span></label>
+    <div class="fees-fixed">
+      <span>매수 <b>2.3%</b></span>
+      <span>매도 <b>0.55%</b></span>
+    </div>
+    <input type="hidden" id="buyFeeRate" value="2.3" />
+    <input type="hidden" id="sellFeeRate" value="0.55" />
+    <small>크림 기준 고정값</small>
   </div>
-  <div class="ctrl">
-    <label>매도 수수료율 (%)</label>
-    <input type="number" id="sellFeeRate" value="0.55" step="0.05" min="0" />
-    <small>가격 × N% (반올림)</small>
-  </div>
-  <div class="ctrl">
+  <div class="ctrl edit">
     <label>카드 할인율 (%)</label>
-    <input type="number" id="cardRate" value="4" step="0.1" min="0" />
+    <input type="number" id="cardRate" value="4" step="0.1" min="0" inputmode="decimal" />
     <small>0이면 정액 할인</small>
   </div>
-  <div class="ctrl">
+  <div class="ctrl edit">
     <label>할인 한도/금액 (원)</label>
-    <input type="number" id="cardCap" value="30000" step="1000" min="0" />
+    <input type="number" id="cardCap" value="30000" step="1000" min="0" inputmode="numeric" />
   </div>
-  <div class="ctrl">
+  <div class="ctrl edit">
     <label>최소 결제 (원)</label>
-    <input type="number" id="minAmount" value="0" step="10000" min="0" />
+    <input type="number" id="minAmount" value="0" step="10000" min="0" inputmode="numeric" />
     <small>미달 시 혜택 없음</small>
   </div>
   <div class="ctrl">
