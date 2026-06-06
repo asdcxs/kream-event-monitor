@@ -216,25 +216,27 @@ export async function scrapeBenefits() {
         continue;
       }
       const detailText = await scrapeBenefitDetail(detailPage, b.url);
+      // 상세 페이지를 실제로 읽었는지 (CI 비로그인 등에서 빈 페이지면 false)
+      const detailOk = !!detailText && /제공|참여|이상\s*결제|즉시할인|청구할인/.test(detailText);
       const cls = classifyBenefit(b.title, detailText);
       Object.assign(b, cls);
       if (cls.minAmountDetail && !b.minAmount) b.minAmount = cls.minAmountDetail;
       b.detailRaw = (detailText || '').slice(0, 300);
 
-      // 이번 추출이 빈약하면(구간/정액/정률 모두 미확보) 캐시의 풍부한 데이터로 보강
+      // 상세를 못 읽었으면(CI 차단 등) 이전 캐시의 분류를 그대로 신뢰 — 구간 데이터 보존
       const prev = cacheByUrl.get(b.url);
-      const thin = (b.benefitType === 'flat' && !b.flatAmount) || (b.benefitType === 'tiered' && (!b.tiers || b.tiers.length === 0));
-      if (prev && thin && prev.benefitType && prev.benefitType !== 'external') {
+      if (!detailOk && prev && prev.benefitType && prev.benefitType !== 'external') {
         b.benefitType = prev.benefitType;
         b.tiers = prev.tiers || [];
         b.flatAmount = prev.flatAmount ?? b.flatAmount;
         b.percent = prev.percent ?? b.percent;
-        if (prev.minAmount && !b.minAmount) b.minAmount = prev.minAmount;
-        if (prev.participation && !b.participation) b.participation = prev.participation;
-        if (prev.totalCount && !b.totalCount) b.totalCount = prev.totalCount;
+        b.cap = prev.cap ?? b.cap;
+        if (prev.minAmount) b.minAmount = prev.minAmount;
+        if (prev.participation) b.participation = prev.participation;
+        if (prev.totalCount) b.totalCount = prev.totalCount;
+      } else if (!b.cap && prev && prev.cap) {
+        b.cap = prev.cap; // 캡은 가격 무관이라 캐시 있으면 보강
       }
-      // 캡은 가격 무관 — 캐시에 있으면 항상 보강
-      if (!b.cap && prev && prev.cap) b.cap = prev.cap;
     }
     await detailPage.close();
 
