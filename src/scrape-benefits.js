@@ -176,6 +176,10 @@ export async function scrapeBenefits() {
       return parsed;
     });
 
+    // 캐시(이전 추출)와 URL로 매칭 — 이번 상세 추출이 비면 캐시의 구간 데이터 재사용
+    const cached = await loadCachedBenefits();
+    const cacheByUrl = new Map(cached.filter((c) => c.url).map((c) => [c.url, c]));
+
     // 각 혜택 상세 페이지 방문해서 구간/정액/정률 + 참여횟수 추출
     const detailPage = await ctx.newPage();
     for (const b of benefits) {
@@ -188,6 +192,19 @@ export async function scrapeBenefits() {
       Object.assign(b, cls);
       if (cls.minAmountDetail && !b.minAmount) b.minAmount = cls.minAmountDetail;
       b.detailRaw = (detailText || '').slice(0, 300);
+
+      // 이번 추출이 빈약하면(구간/정액/정률 모두 미확보) 캐시의 풍부한 데이터로 보강
+      const prev = cacheByUrl.get(b.url);
+      const thin = (b.benefitType === 'flat' && !b.flatAmount) || (b.benefitType === 'tiered' && (!b.tiers || b.tiers.length === 0));
+      if (prev && thin && prev.benefitType && prev.benefitType !== 'external') {
+        b.benefitType = prev.benefitType;
+        b.tiers = prev.tiers || [];
+        b.flatAmount = prev.flatAmount ?? b.flatAmount;
+        b.percent = prev.percent ?? b.percent;
+        if (prev.minAmount && !b.minAmount) b.minAmount = prev.minAmount;
+        if (prev.participation && !b.participation) b.participation = prev.participation;
+        if (prev.totalCount && !b.totalCount) b.totalCount = prev.totalCount;
+      }
     }
     await detailPage.close();
 
