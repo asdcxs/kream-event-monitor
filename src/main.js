@@ -25,8 +25,21 @@ async function saveJson(p, data) {
   await fs.writeFile(p, JSON.stringify(data, null, 2) + '\n', 'utf8');
 }
 
-function extractIdFromUrl(url) {
-  return url?.match(/exhibitions\/([^/?#]+)/)?.[1] || null;
+// 혜택 dedup 키. 크림은 혜택 URL 경로를 /exhibitions/ → /content/ 로 바꾼 적이 있어
+// 특정 경로에 의존하지 않고 "kream.co.kr 의 마지막 경로 세그먼트(id/slug)"를 키로 쓴다.
+// 외부 링크(네이버페이 등)는 전체 URL을 키로 쓴다.
+function benefitKey(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    if (/kream\.co\.kr$/.test(u.hostname)) {
+      const seg = u.pathname.split('/').filter(Boolean).pop();
+      return seg || null;
+    }
+    return `${u.hostname}${u.pathname}`;
+  } catch {
+    return url; // URL 파싱 실패 시 원문 그대로
+  }
 }
 
 const HELP_TEXT = `🤖 <b>KREAM 결제혜택 알림 봇</b>
@@ -74,8 +87,13 @@ async function processCommands({ botToken, chatId, notifyState }) {
 }
 
 async function analyzeBenefit(benefit) {
-  const id = extractIdFromUrl(benefit.url);
-  if (!id) return { topProducts: [] };
+  if (!benefit.url) return { topProducts: [] };
+  // 크림 도메인 페이지만 상품 그리드를 가짐. 외부 링크(네이버페이 등)는 스킵.
+  try {
+    if (!/kream\.co\.kr$/.test(new URL(benefit.url).hostname)) return { topProducts: [] };
+  } catch {
+    return { topProducts: [] };
+  }
 
   // 수수료 100% 면제 이벤트인지 여부 (feepromo 등)
   const isFeeWaived = /수수료\s*(100|면제|할인)/.test(benefit.title || '');
@@ -83,9 +101,9 @@ async function analyzeBenefit(benefit) {
 
   let products;
   try {
-    products = await scrapeExhibitionProducts(id);
+    products = await scrapeExhibitionProducts(benefit.url);
   } catch (e) {
-    console.warn(`  상품 추출 실패 (${id}):`, e.message.split('\n')[0]);
+    console.warn(`  상품 추출 실패 (${benefit.url}):`, e.message.split('\n')[0]);
     return { topProducts: [] };
   }
 
@@ -134,7 +152,7 @@ async function main() {
   const seenBenefits = await loadJson(SEEN_BENEFITS_PATH, { ids: {} });
   const isFirstRun = Object.keys(seenBenefits.ids).length === 0;
   const newBenefits = benefits.filter((b) => {
-    const id = extractIdFromUrl(b.url);
+    const id = benefitKey(b.url);
     return id && !seenBenefits.ids[id];
   });
   console.log(`신규 결제 혜택: ${newBenefits.length}개`);
@@ -143,7 +161,7 @@ async function main() {
     console.log('첫 실행 — baseline 등록만, 알림 생략');
   } else if (newBenefits.length > 0 && notifyState.enabled && !dryRun) {
     for (const benefit of newBenefits) {
-      const id = extractIdFromUrl(benefit.url);
+      const id = benefitKey(benefit.url);
       console.log(`  → 신규 혜택 [${id}] "${(benefit.title || '').slice(0, 40)}"`);
       const { topProducts } = await analyzeBenefit(benefit);
       console.log(`     차익률 ${(MIN_PROFIT_RATE * 100).toFixed(0)}% 이상 상품 ${topProducts.length}건`);
@@ -173,7 +191,7 @@ async function main() {
       ...seenBenefits.ids,
       ...Object.fromEntries(
         benefits
-          .map((b) => extractIdFromUrl(b.url))
+          .map((b) => benefitKey(b.url))
           .filter(Boolean)
           .map((id) => [id, seenBenefits.ids[id] || now])
       ),
