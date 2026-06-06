@@ -56,7 +56,9 @@ export async function notifyEventWithProfit({ botToken, chatId, event, topProduc
     text += `\n(차익률 5% 이상 상품 없음 또는 상품 추출 실패)\n`;
   }
 
-  text += `\n<a href="${event.url}">이벤트 페이지로 →</a>`;
+  const siteUrl = process.env.SITE_URL || 'https://asdcxs.github.io/kream-event-monitor/';
+  text += `\n<a href="${event.url}">크림 이벤트 페이지 →</a>`;
+  text += `\n<a href="${siteUrl}">📊 차익 계산기 사이트 →</a>`;
   return sendTelegram({ botToken, chatId, text, disableLinkPreview: true });
 }
 
