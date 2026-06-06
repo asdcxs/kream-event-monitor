@@ -403,8 +403,12 @@ const html = `<!doctype html>
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 14px;
     padding: 4px 14px 16px;
-    align-items: end;
+    align-items: start;
   }
+  /* 라벨 높이 통일 → 입력칸이 같은 높이에서 시작, small 은 아래로 흘림 */
+  .adv-grid .ctrl:not(.toggle) { display: flex; flex-direction: column; }
+  .adv-grid .ctrl:not(.toggle) label { min-height: 16px; line-height: 1.3; }
+  .adv-grid .ctrl.toggle { align-self: start; padding-top: 24px; }
   .ctrl label {
     display: block;
     font-size: 11px;
