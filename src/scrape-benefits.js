@@ -7,6 +7,84 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BENEFITS_CACHE = path.join(__dirname, '..', 'data', 'benefits-cache.json');
 const BENEFITS_URL = 'https://kream.co.kr/content/11368';
 
+// "30/50/80만원" → [300000,500000,800000]
+function parseThresholds(text) {
+  const m = text.match(/([\d]+(?:\s*\/\s*[\d]+)*)\s*만\s*원\s*이상/);
+  if (!m) return [];
+  return m[1].split('/').map((s) => parseInt(s.trim(), 10) * 10000).filter((n) => n > 0);
+}
+
+// 금액 시퀀스 후보를 모두 찾아 토큰이 가장 많은 것을 채택.
+// "최대 3만원 즉시할인"(요약, 1개) 보다 "1만원/2만원/3만원 즉시할인"(구간, 3개)을 우선.
+function parseAmounts(text) {
+  const re = /((?:\d+\s*(?:만|천)\s*원)(?:\s*\/\s*\d+\s*(?:만|천)\s*원)+)/g; // 슬래시로 2개 이상
+  let best = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const toks = m[1].split('/').map((tok) => {
+      const mm = tok.match(/(\d+)\s*(만|천)/);
+      return mm ? parseInt(mm[1], 10) * (mm[2] === '만' ? 10000 : 1000) : 0;
+    }).filter((n) => n > 0);
+    if (toks.length > best.length) best = toks;
+  }
+  if (best.length > 0) return best;
+  // 단일 금액(정액): "5천원 ... 할인" 또는 "5,000원"
+  const single = text.match(/(\d+)\s*(만|천)\s*원\s*(?:즉시|청구)?\s*할인/);
+  if (single) return [parseInt(single[1], 10) * (single[2] === '만' ? 10000 : 1000)];
+  return [];
+}
+
+// 상세 페이지 본문 텍스트 → 혜택 타입/구간/참여횟수 분류
+function classifyBenefit(title, detailText) {
+  const text = `${title}\n${detailText || ''}`;
+  // 정률(%) 판정은 제목 기준만 (상세 본문의 무관한 % 텍스트 오인 방지)
+  const pct = (title.match(/(\d+(?:\.\d+)?)\s*%/) || [])[1];
+  const thresholds = parseThresholds(detailText || '');
+  const amounts = parseAmounts(detailText || '');
+
+  // 참여 횟수
+  const partM = text.match(/(?:계정당|혜택당|기간\s*내)?\s*(?:최대\s*)?(\d+)\s*회\s*참여/);
+  const totalM = text.match(/총\s*(\d+)\s*회/);
+  const participation = partM ? parseInt(partM[1], 10) : null;
+  const totalCount = totalM ? parseInt(totalM[1], 10) : null;
+
+  let type, tiers = [], flatAmount = null, percent = null, minAmount = null;
+  if (pct) {
+    type = 'percent';
+    percent = parseFloat(pct);
+    minAmount = thresholds[0] || null;
+  } else if (thresholds.length >= 2 || amounts.length >= 2) {
+    type = 'tiered';
+    const n = Math.min(thresholds.length, amounts.length);
+    for (let i = 0; i < n; i++) tiers.push({ threshold: thresholds[i], amount: amounts[i] });
+    minAmount = thresholds[0] || null;
+  } else {
+    type = 'flat';
+    // 상세에서 못 잡으면 제목의 "최대 N천/만원"에서 폴백
+    flatAmount = amounts[0] || null;
+    if (!flatAmount) {
+      const tm = title.match(/(\d+)\s*(만|천)\s*원/);
+      if (tm) flatAmount = parseInt(tm[1], 10) * (tm[2] === '만' ? 10000 : 1000);
+    }
+    minAmount = thresholds[0] || null;
+  }
+  return { benefitType: type, tiers, flatAmount, percent, minAmountDetail: minAmount, participation, totalCount };
+}
+
+async function scrapeBenefitDetail(page, url) {
+  try {
+    await page.goto(url, { waitUntil: 'commit', timeout: 30000 });
+    await page.waitForTimeout(4500);
+    return await page.evaluate(() => {
+      const lines = document.body.innerText.split('\n').map((l) => l.trim()).filter(Boolean);
+      // 푸터/네비 제외하고 본문 상단부만
+      return lines.slice(0, 25).join('\n');
+    });
+  } catch {
+    return '';
+  }
+}
+
 export async function scrapeBenefits() {
   const { ctx } = await openKreamBrowser({ viewport: { width: 1280, height: 1600 } });
   const page = await ctx.newPage();
@@ -98,6 +176,21 @@ export async function scrapeBenefits() {
       return parsed;
     });
 
+    // 각 혜택 상세 페이지 방문해서 구간/정액/정률 + 참여횟수 추출
+    const detailPage = await ctx.newPage();
+    for (const b of benefits) {
+      if (!b.url || !/kream\.co\.kr/.test(b.url)) {
+        Object.assign(b, { benefitType: 'external', tiers: [], flatAmount: null, percent: null });
+        continue;
+      }
+      const detailText = await scrapeBenefitDetail(detailPage, b.url);
+      const cls = classifyBenefit(b.title, detailText);
+      Object.assign(b, cls);
+      if (cls.minAmountDetail && !b.minAmount) b.minAmount = cls.minAmountDetail;
+      b.detailRaw = (detailText || '').slice(0, 300);
+    }
+    await detailPage.close();
+
     if (benefits.length > 0) {
       await fs.writeFile(BENEFITS_CACHE, JSON.stringify(benefits), 'utf8');
     }
@@ -122,12 +215,12 @@ if (import.meta.url === pathToFileURL(process.argv[1]).href) {
     const parts = [];
     if (b.payMethods.length) parts.push(b.payMethods.join('/'));
     if (b.cards.length) parts.push(b.cards.join('/'));
-    if (b.discountPercent) parts.push(`${b.discountPercent}%`);
-    else if (b.discountAmount) parts.push(b.discountAmount);
-    if (b.discountType) parts.push(b.discountType);
-    if (b.startDate) parts.push(b.startDate);
-    if (b.minAmount) parts.push(`${b.minAmount.toLocaleString()}+`);
+    parts.push(`[${b.benefitType}]`);
+    if (b.benefitType === 'percent') parts.push(`${b.percent}%`);
+    else if (b.benefitType === 'flat') parts.push(`${(b.flatAmount || 0).toLocaleString()}원`);
+    else if (b.benefitType === 'tiered') parts.push(b.tiers.map((t) => `${t.threshold / 10000}만→${t.amount.toLocaleString()}`).join(' / '));
+    if (b.participation) parts.push(`${b.participation}회${b.totalCount ? `(총${b.totalCount})` : ''}`);
     console.log(`  - ${parts.join(' | ')}`);
-    console.log(`    raw: ${b.raw}`);
+    console.log(`    ${b.title}`);
   }
 }

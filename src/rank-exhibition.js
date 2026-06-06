@@ -318,6 +318,27 @@ const html = `<!doctype html>
   }
   .benefit .b-rate.billed { color: var(--blue); }
   .benefit .b-cond { color: var(--muted); font-size: 11.5px; }
+  /* 구간별 미니 테이블 */
+  .benefit .b-tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin: 2px 0;
+  }
+  .benefit .b-tier {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11.5px;
+    padding: 2px 6px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 4px;
+  }
+  .benefit .b-tier span { color: var(--muted); }
+  .benefit .b-tier b { color: var(--accent); font-variant-numeric: tabular-nums; }
+  .benefit.bt-tiered { border-left: 3px solid var(--warn); }
+  .benefit.bt-percent { border-left: 3px solid var(--blue); }
+  .benefit.bt-flat { border-left: 3px solid var(--accent); }
+  .benefit.bt-external { border-left: 3px solid var(--dim); }
   .benefit .b-foot {
     display: flex;
     justify-content: space-between;
@@ -692,21 +713,45 @@ const $ = (id) => document.getElementById(id);
 
 function fmt(n) { return n.toLocaleString('ko-KR') + '원'; }
 
+let selectedBenefit = null;
+
+// 선택된 혜택의 타입에 따라 가격별 카드 할인액 계산
+function discountForBenefit(price, b, inp) {
+  if (!price) return 0;
+  if (b.benefitType === 'percent') {
+    if (b.minAmount && price < b.minAmount) return 0;
+    const cap = inp.cardCap || Infinity;
+    return Math.min(Math.floor(price * (b.percent / 100)), cap);
+  }
+  if (b.benefitType === 'tiered') {
+    let amt = 0;
+    for (const t of (b.tiers || [])) if (price >= t.threshold) amt = t.amount;
+    return amt; // 최저 구간 미달이면 0
+  }
+  if (b.benefitType === 'flat') {
+    const min = b.minAmount || 0;
+    return price >= min ? (b.flatAmount || 0) : 0;
+  }
+  return 0; // external
+}
+
 function compute(p, inp) {
   if (!p) return null;
   const buyFee = Math.ceil(p * inp.buyFeeRate);
   const sellFee = Math.round(p * inp.sellFeeRate);
-  if (inp.minAmount && p < inp.minAmount) {
-    return { cardDiscount: 0, buyFee, sellFee, profit: -buyFee - sellFee, ineligible: true };
-  }
+
   let cardDiscount;
-  if (inp.cardRate > 0) {
+  if (selectedBenefit) {
+    cardDiscount = discountForBenefit(p, selectedBenefit, inp);
+  } else if (inp.minAmount && p < inp.minAmount) {
+    cardDiscount = 0;
+  } else if (inp.cardRate > 0) {
     cardDiscount = Math.min(Math.floor(p * inp.cardRate), inp.cardCap || Infinity);
   } else {
     cardDiscount = inp.cardCap; // 정액 할인
   }
   const profit = cardDiscount - buyFee - sellFee;
-  return { cardDiscount, buyFee, sellFee, profit };
+  return { cardDiscount, buyFee, sellFee, profit, ineligible: cardDiscount === 0 };
 }
 
 function readInputs() {
@@ -722,65 +767,61 @@ function readInputs() {
   };
 }
 
-// 혜택 → 카드 파라미터 변환 (raw 텍스트로 정확히 amount 추출)
+// 혜택의 대표 카드 파라미터 (직접입력 필드 채우기용)
 function benefitToParams(b) {
-  const text = (b.title || '') + ' ' + (b.subtitle || '');
-  if (b.discountPercent) {
-    return {
-      cardRate: b.discountPercent,
-      cardCap: 30000, // 일반적 한도. 정확한 한도는 혜택 상세에 있으나 비로그인으로 못 잡음
-      minAmount: b.minAmount || 0,
-    };
+  if (b.benefitType === 'percent') {
+    return { cardRate: b.percent || 0, cardCap: 30000, minAmount: b.minAmount || 0 };
   }
-  // 정액
-  let amount = 0;
-  const m1 = text.match(/(\d+)\s*만\s*원/);
-  const m2 = text.match(/(\d+)\s*천\s*원/);
-  if (m1) amount = parseInt(m1[1]) * 10000;
-  else if (m2) amount = parseInt(m2[1]) * 1000;
-  return { cardRate: 0, cardCap: amount, minAmount: b.minAmount || 0 };
+  if (b.benefitType === 'tiered') {
+    const maxAmt = (b.tiers || []).reduce((m, t) => Math.max(m, t.amount), 0);
+    return { cardRate: 0, cardCap: maxAmt, minAmount: b.minAmount || 0 };
+  }
+  // flat
+  return { cardRate: 0, cardCap: b.flatAmount || 0, minAmount: b.minAmount || 0 };
+}
+
+const TYPE_LABEL = { percent: '정률', tiered: '구간별', flat: '정액', external: '외부' };
+
+function benefitMethodName(b) {
+  const method = b.payMethods.length ? b.payMethods.join(' × ') : (b.cards[0] || '카드');
+  const cardSuffix = b.payMethods.length && b.cards.length ? \` (\${b.cards[0]})\` : '';
+  return method + cardSuffix;
 }
 
 function benefitLabel(b) {
-  const method = b.payMethods.length ? b.payMethods.join(' × ') : (b.cards[0] || '카드');
-  const cardSuffix = b.payMethods.length && b.cards.length ? \` (\${b.cards[0]})\` : '';
-  const text = (b.title || '') + ' ' + (b.subtitle || '');
+  const name = benefitMethodName(b);
   let amt = '';
-  if (b.discountPercent) amt = b.discountPercent + '%';
-  else {
-    const m1 = text.match(/(\d+)\s*만\s*원/);
-    const m2 = text.match(/(\d+)\s*천\s*원/);
-    if (m1) amt = m1[0];
-    else if (m2) amt = m2[0];
-  }
-  const type = b.discountType === '청구할인' ? '청구' : '';
-  const cond = b.minAmount ? \` · \${(b.minAmount/10000).toFixed(0)}만+\` : '';
-  return \`\${method}\${cardSuffix} \${amt} \${type}\${cond}\`.trim();
+  if (b.benefitType === 'percent') amt = (b.percent || 0) + '%';
+  else if (b.benefitType === 'tiered') {
+    const maxAmt = (b.tiers || []).reduce((m, t) => Math.max(m, t.amount), 0);
+    amt = '최대 ' + maxAmt.toLocaleString() + '원';
+  } else if (b.benefitType === 'flat') amt = (b.flatAmount || 0).toLocaleString() + '원';
+  else return name + ' · 외부 이벤트';
+  const cond = b.minAmount ? \` · \${(b.minAmount / 10000).toFixed(0)}만+\` : '';
+  const rep = b.totalCount ? \` · 총\${b.totalCount}회\` : (b.participation ? \` · \${b.participation}회\` : '');
+  return \`[\${TYPE_LABEL[b.benefitType]}] \${name} \${amt}\${cond}\${rep}\`;
 }
 
 function initBenefitSelect() {
   const sel = $('benefitSelect');
-  const sorted = [...BENEFITS]
-    .map((b, originalIdx) => ({ b, originalIdx, params: benefitToParams(b) }))
-    .sort((a, b) => {
-      // 정렬: percent 큰 순 → amount 큰 순
-      if (a.b.discountPercent && b.b.discountPercent) return b.b.discountPercent - a.b.discountPercent;
-      if (a.b.discountPercent) return -1;
-      if (b.b.discountPercent) return 1;
-      return b.params.cardCap - a.params.cardCap;
-    });
+  // 계산 가능한 혜택만 (외부 링크 제외)
+  const selectable = BENEFITS
+    .map((b, originalIdx) => ({ b, originalIdx }))
+    .filter((s) => s.b.benefitType !== 'external');
 
   sel.innerHTML = '<option value="-1">— 직접 입력 —</option>' +
-    sorted.map((s, i) => \`<option value="\${s.originalIdx}" \${i === 0 ? 'selected' : ''}>\${benefitLabel(s.b)}</option>\`).join('');
+    selectable.map((s, i) => \`<option value="\${s.originalIdx}" \${i === 0 ? 'selected' : ''}>\${benefitLabel(s.b)}</option>\`).join('');
 
   sel.addEventListener('change', () => {
     const idx = parseInt(sel.value);
-    if (idx < 0) return;
+    if (idx < 0) { selectedBenefit = null; updateBenefitHint(); render(); return; }
     const b = BENEFITS[idx];
+    selectedBenefit = b;
     const p = benefitToParams(b);
     $('cardRate').value = p.cardRate || 0;
     $('cardCap').value = p.cardCap || 0;
     $('minAmount').value = p.minAmount || 0;
+    updateBenefitHint();
     render();
   });
 
@@ -788,12 +829,28 @@ function initBenefitSelect() {
   ['cardRate', 'cardCap', 'minAmount'].forEach((id) => {
     $(id).addEventListener('input', () => {
       sel.value = '-1';
+      selectedBenefit = null;
+      updateBenefitHint();
     });
   });
 
   // 초기 자동 적용
-  if (BENEFITS.length > 0 && sel.value !== '-1') {
+  if (selectable.length > 0 && sel.value !== '-1') {
     sel.dispatchEvent(new Event('change'));
+  }
+}
+
+function updateBenefitHint() {
+  const hint = $('benefitHint');
+  if (!hint) return;
+  if (!selectedBenefit) { hint.textContent = '직접 입력 모드 — 카드 할인율/한도/최소결제 적용'; return; }
+  const b = selectedBenefit;
+  if (b.benefitType === 'tiered') {
+    hint.innerHTML = '구간별: ' + (b.tiers || []).map((t) => \`\${(t.threshold/10000).toFixed(0)}만→\${(t.amount/10000)>=1?(t.amount/10000)+'만':(t.amount/1000)+'천'}\`).join(' / ') + (b.totalCount ? \` (총 \${b.totalCount}회)\` : '');
+  } else if (b.benefitType === 'percent') {
+    hint.textContent = \`정률 \${b.percent}% (한도 \${(parseFloat($('cardCap').value)||0).toLocaleString()}원) — 상품별 자동 계산\`;
+  } else {
+    hint.textContent = \`정액 \${(b.flatAmount||0).toLocaleString()}원\${b.minAmount? ' · '+(b.minAmount/10000).toFixed(0)+'만원 이상':''}\`;
   }
 }
 
@@ -864,31 +921,45 @@ function renderBenefits() {
   });
 
   $('benefitsScroll').innerHTML = filtered.map((b) => {
-    const method = b.payMethods.length ? b.payMethods.join(' × ') : (b.cards[0] || '카드');
-    const condParts = [];
-    if (b.cards.length && !b.payMethods.length) condParts.push(b.cards.join(', '));
-    else if (b.cards.length && b.payMethods.length) condParts.push(b.cards.join(', ') + ' 결제');
-    if (b.minAmount) condParts.push(\`\${(b.minAmount / 10000).toFixed(0)}만원+\`);
-    if (b.firstComeLimit) condParts.push(\`선착순 \${b.firstComeLimit}명\`);
-    if (b.maxCount) condParts.push(\`최대 \${b.maxCount}회\`);
-
-    const rateText = b.discountPercent
-      ? \`\${b.discountPercent}%\`
-      : (b.discountAmount ? b.discountAmount + '원' : '-');
-
+    const method = benefitMethodName(b);
     const typeKey = b.discountType === '청구할인' ? 'billed' : 'instant';
     const url = b.url || 'https://kream.co.kr/content/11368';
+    const bt = b.benefitType;
+
+    // 상단 우측 요약 값
+    let rateText = '';
+    if (bt === 'percent') rateText = \`\${b.percent}%\`;
+    else if (bt === 'flat') rateText = \`\${(b.flatAmount || 0).toLocaleString()}원\`;
+    else if (bt === 'tiered') rateText = \`최대 \${((b.tiers||[]).reduce((m,t)=>Math.max(m,t.amount),0)).toLocaleString()}\`;
+    else rateText = '이벤트';
+
+    // 본문: 타입별
+    let bodyHtml = '';
+    if (bt === 'tiered') {
+      bodyHtml = '<div class="b-tiers">' + (b.tiers || []).map((t) => {
+        const amtTxt = t.amount >= 10000 ? (t.amount/10000)+'만' : (t.amount/1000)+'천';
+        return \`<div class="b-tier"><span>\${(t.threshold/10000).toFixed(0)}만↑</span><b>\${amtTxt}원</b></div>\`;
+      }).join('') + '</div>';
+    } else if (bt === 'percent') {
+      bodyHtml = \`<div class="b-cond">\${b.minAmount ? (b.minAmount/10000).toFixed(0)+'만원 이상' : '금액 무관'} · 정률 할인</div>\`;
+    } else if (bt === 'flat') {
+      bodyHtml = \`<div class="b-cond">\${b.minAmount ? (b.minAmount/10000).toFixed(0)+'만원 이상' : ''} 정액 할인</div>\`;
+    } else {
+      bodyHtml = \`<div class="b-cond">\${b.title || '외부 이벤트'}</div>\`;
+    }
+
+    const rep = b.totalCount ? \`총 \${b.totalCount}회\` : (b.participation ? \`\${b.participation}회\` : '');
 
     return \`
-      <a class="benefit \${typeKey}" href="\${url}" target="_blank" rel="noopener">
+      <a class="benefit \${typeKey} bt-\${bt}" href="\${url}" target="_blank" rel="noopener">
         <div class="b-head">
           <span class="b-method">\${method}</span>
           <span class="b-rate \${typeKey}">\${rateText}</span>
         </div>
-        <div class="b-cond">\${condParts.join(' · ') || b.subtitle || ''}</div>
+        \${bodyHtml}
         <div class="b-foot">
-          <span class="b-type \${typeKey}">\${b.discountType || '-'}</span>
-          <span>\${b.startDate ? b.startDate + ' 시작' : ''} <span class="b-arrow">→</span></span>
+          <span class="b-type \${typeKey}">\${TYPE_LABEL[bt] || ''}\${b.discountType ? ' · '+b.discountType : ''}</span>
+          <span>\${rep}\${rep && b.startDate ? ' · ' : ''}\${b.startDate || ''} <span class="b-arrow">→</span></span>
         </div>
       </a>\`;
   }).join('');
