@@ -10,4 +10,8 @@ data/chrome-profile/
 data/chrome-profile-chromium/
 data/edge-profile/
 data/probe-result.json
+data/api-calls.json
+data/nuxt-probe.json
+data/product-page.html
+data/*.png
 

@@ -541,6 +541,20 @@ const html = `<!doctype html>
     border-radius: 6px;
     z-index: 1;
   }
+  .badge-express {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: var(--accent);
+    color: #000;
+    font-size: 10px;
+    font-weight: 800;
+    padding: 3px 7px;
+    border-radius: 6px;
+    z-index: 2;
+  }
+  /* 빠른배송 배지가 있으면 랭크는 그 아래로 */
+  .card.has-express .rank { top: 34px; }
 
   .img-wrap {
     aspect-ratio: 1;
@@ -737,6 +751,10 @@ const html = `<!doctype html>
         <div class="switch on" id="hideLossSwitch" role="checkbox" aria-checked="true"></div>
         <label class="switch-label" for="hideLossSwitch" onclick="document.getElementById('hideLossSwitch').click()">손실 상품 숨기기</label>
       </div>
+      <div class="ctrl toggle">
+        <div class="switch" id="expressOnlySwitch" role="checkbox" aria-checked="false"></div>
+        <label class="switch-label" for="expressOnlySwitch" onclick="document.getElementById('expressOnlySwitch').click()">⚡ 빠른배송만</label>
+      </div>
     </div>
   </details>
 </div>
@@ -804,6 +822,7 @@ function readInputs() {
     sortBy: $('sortBy').value,
     hideSized: $('hideSizedSwitch').classList.contains('on'),
     hideLoss: $('hideLossSwitch').classList.contains('on'),
+    expressOnly: $('expressOnlySwitch').classList.contains('on'),
   };
 }
 
@@ -1018,6 +1037,7 @@ document.querySelectorAll('#benefitsTabs button').forEach((btn) => {
 function render() {
   const inp = readInputs();
   let filtered = inp.hideSized ? DATA.filter((d) => !d.sized) : DATA;
+  if (inp.expressOnly) filtered = filtered.filter((d) => (d.tags || []).includes('빠른배송'));
   const enriched = filtered.map((d) => ({ ...d, calc: compute(d.price, inp) }));
   const visible = inp.hideLoss ? enriched.filter((e) => !e.calc || e.calc.profit > 0) : enriched;
 
@@ -1057,10 +1077,12 @@ function render() {
     const profitClass = c && c.profit > 0 ? 'pos' : c && c.profit < 0 ? 'neg' : '';
     const sign = c && c.profit > 0 ? '+' : '';
     const rankClass = inp.sortBy === 'profit' && idx < 3 && c && c.profit > 0 ? 'top-profit' : '';
+    const express = (it.tags || []).includes('빠른배송');
 
     return \`
-    <a class="card \${klass}" href="\${it.url}" target="_blank" rel="noopener">
+    <a class="card \${klass} \${express ? 'has-express' : ''}" href="\${it.url}" target="_blank" rel="noopener">
       <span class="rank \${rankClass}">#\${idx + 1}</span>
+      \${express ? '<span class="badge-express">⚡ 빠른배송</span>' : ''}
       \${it.sized ? '<span class="badge-sized">SIZE</span>' : ''}
       <div class="img-wrap">\${it.img ? \`<img src="\${it.img}" alt="" loading="lazy" />\` : ''}</div>
       <div class="body">
@@ -1090,7 +1112,7 @@ function render() {
   $(id).addEventListener('change', render);
 });
 
-['hideSizedSwitch', 'hideLossSwitch'].forEach((id) => {
+['hideSizedSwitch', 'hideLossSwitch', 'expressOnlySwitch'].forEach((id) => {
   $(id).addEventListener('click', () => {
     const sw = $(id);
     sw.classList.toggle('on');
