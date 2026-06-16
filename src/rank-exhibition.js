@@ -796,6 +796,10 @@ const html = `<!doctype html>
         <div class="switch" id="expressOnlySwitch" role="checkbox" aria-checked="false"></div>
         <label class="switch-label" for="expressOnlySwitch" onclick="document.getElementById('expressOnlySwitch').click()">⚡ 빠른배송만</label>
       </div>
+      <div class="ctrl toggle">
+        <div class="switch" id="undercutSwitch" role="checkbox" aria-checked="false"></div>
+        <label class="switch-label" for="undercutSwitch" onclick="document.getElementById('undercutSwitch').click()">천원 내려 판매 (-1,000)</label>
+      </div>
     </div>
   </details>
 </div>
@@ -849,8 +853,9 @@ function compute(p, inp) {
   } else {
     cardDiscount = inp.cardCap; // 정액 할인
   }
-  const profit = cardDiscount - buyFee - sellFee;
-  return { cardDiscount, buyFee, sellFee, profit, ineligible: cardDiscount === 0 };
+  const undercut = inp.undercut || 0; // 빨리 팔려고 천원 내려 판매 시 손익 차감
+  const profit = cardDiscount - buyFee - sellFee - undercut;
+  return { cardDiscount, buyFee, sellFee, undercut, profit, ineligible: cardDiscount === 0 };
 }
 
 function readInputs() {
@@ -864,6 +869,7 @@ function readInputs() {
     hideSized: $('hideSizedSwitch').classList.contains('on'),
     hideLoss: $('hideLossSwitch').classList.contains('on'),
     expressOnly: $('expressOnlySwitch').classList.contains('on'),
+    undercut: $('undercutSwitch').classList.contains('on') ? 1000 : 0,
   };
 }
 
@@ -1138,6 +1144,7 @@ function render() {
           <span class="lbl">카드 할인</span><span class="val pos">+\${fmt(c.cardDiscount)}</span>
           <span class="lbl">매수 수수료</span><span class="val neg">-\${fmt(c.buyFee)}</span>
           <span class="lbl">매도 수수료</span><span class="val neg">-\${fmt(c.sellFee)}</span>
+          \${c.undercut ? \`<span class="lbl">천원 내려판매</span><span class="val neg">-\${fmt(c.undercut)}</span>\` : ''}
         </div>
         <div class="profit-row">
           <span class="lbl">순 손익</span>
@@ -1153,7 +1160,7 @@ function render() {
   $(id).addEventListener('change', render);
 });
 
-['hideSizedSwitch', 'hideLossSwitch', 'expressOnlySwitch'].forEach((id) => {
+['hideSizedSwitch', 'hideLossSwitch', 'expressOnlySwitch', 'undercutSwitch'].forEach((id) => {
   $(id).addEventListener('click', () => {
     const sw = $(id);
     sw.classList.toggle('on');
