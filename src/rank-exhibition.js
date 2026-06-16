@@ -190,9 +190,42 @@ const html = `<!doctype html>
     max-width: 1400px;
     margin: 0 auto;
   }
+  .header-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
   header h1 { margin: 0 0 6px; font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
   header .meta { color: var(--muted); font-size: 12.5px; }
   header .meta a { color: var(--accent); text-decoration: none; }
+  .refresh-btn {
+    flex-shrink: 0;
+    background: var(--card);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    white-space: nowrap;
+  }
+  .refresh-btn:hover { background: var(--card-hover); border-color: var(--accent); }
+  .refresh-btn:disabled { opacity: 0.6; cursor: progress; }
+  .refresh-btn .refresh-ico { display: inline-block; }
+  .refresh-btn.spinning .refresh-ico { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .refresh-status {
+    margin-top: 10px;
+    font-size: 12.5px;
+    color: var(--muted);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    line-height: 1.5;
+  }
+  .refresh-status a { color: var(--accent); }
+  .refresh-status.err { border-color: var(--neg); color: var(--neg); }
+  .refresh-status.ok { border-color: var(--accent); }
 
   /* 결제 혜택 노티스 */
   .benefits {
@@ -623,6 +656,8 @@ const html = `<!doctype html>
     header { padding: 18px 14px 12px; }
     header h1 { font-size: 18px; }
     header .meta { font-size: 11px; }
+    .header-top { flex-direction: column; align-items: stretch; gap: 8px; }
+    .refresh-btn { width: 100%; padding: 11px; font-size: 14px; }
     .benefits, .summary { padding: 12px 14px; }
     main { padding: 12px 14px 100px; }
 
@@ -676,13 +711,19 @@ const html = `<!doctype html>
 </head>
 <body>
 <header>
-  <h1>${pageTitle.replace(/\s*\|\s*KREAM/, '')}</h1>
+  <div class="header-top">
+    <h1>${pageTitle.replace(/\s*\|\s*KREAM/, '')}</h1>
+    <button id="refreshBtn" class="refresh-btn" title="GitHub Actions로 최신 가격 재생성">
+      <span class="refresh-ico">🔄</span> <span id="refreshLabel">가격 새로고침</span>
+    </button>
+  </div>
   <div class="meta">
     수수료 100% 할인 + 결제 혜택 결합 손익 계산기 ·
     <a href="${URL_}" target="_blank" rel="noopener">원본 이벤트 →</a>
     <a href="https://kream.co.kr/content/11368" target="_blank" rel="noopener" style="margin-left:8px">결제 혜택 페이지 →</a>
-    · 생성 ${new Date().toLocaleString('ko-KR')}
+    · <span id="genTime" data-build="${new Date().toISOString()}">생성 ${new Date().toLocaleString('ko-KR')}</span>
   </div>
+  <div id="refreshStatus" class="refresh-status" hidden></div>
 </header>
 
 <section class="benefits">
@@ -1124,6 +1165,129 @@ function render() {
 // 설정 패널: 데스크탑은 펼침, 모바일(<=640px)은 접힘
 const ctrlPanel = $('ctrlPanel');
 if (ctrlPanel) ctrlPanel.open = window.matchMedia('(min-width: 641px)').matches;
+
+// ===== 가격 새로고침 (GitHub Actions 워크플로우 트리거) =====
+const GH_REPO = 'asdcxs/kream-event-monitor';
+const GH_WORKFLOW = 'monitor.yml';
+const GH_TOKEN_KEY = 'kream_gh_token';
+
+function relTime(iso) {
+  try {
+    const diff = (Date.now() - new Date(iso).getTime()) / 60000; // 분
+    if (diff < 1) return '방금';
+    if (diff < 60) return Math.floor(diff) + '분 전';
+    if (diff < 1440) return Math.floor(diff / 60) + '시간 전';
+    return Math.floor(diff / 1440) + '일 전';
+  } catch { return ''; }
+}
+(function showGenRel() {
+  const el = $('genTime');
+  if (el && el.dataset.build) el.textContent = '생성 ' + new Date(el.dataset.build).toLocaleString('ko-KR') + ' (' + relTime(el.dataset.build) + ')';
+})();
+
+function setStatus(msg, kind) {
+  const s = $('refreshStatus');
+  s.hidden = false;
+  s.className = 'refresh-status' + (kind ? ' ' + kind : '');
+  s.innerHTML = msg;
+}
+
+function getToken() {
+  let t = localStorage.getItem(GH_TOKEN_KEY);
+  if (t) return t;
+  const guide = '가격 새로고침은 GitHub Actions를 실행해서 페이지를 다시 만듭니다.\\n\\n1회만 GitHub 토큰이 필요해요 (브라우저에만 저장, 저장소엔 안 들어감):\\n\\n1) https://github.com/settings/tokens/new?scopes=repo&description=kream-refresh 접속\\n2) Generate token → 생성된 ghp_... 복사\\n3) 아래에 붙여넣기\\n\\n토큰 입력:';
+  t = window.prompt(guide, '');
+  if (t && /^gh[ps]_/.test(t.trim())) {
+    t = t.trim();
+    localStorage.setItem(GH_TOKEN_KEY, t);
+    return t;
+  }
+  if (t) setStatus('토큰 형식이 올바르지 않습니다 (ghp_ 로 시작해야 함).', 'err');
+  return null;
+}
+
+async function ghFetch(url, opts) {
+  const token = localStorage.getItem(GH_TOKEN_KEY);
+  return fetch(url, {
+    ...opts,
+    headers: {
+      Authorization: 'Bearer ' + token,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      ...(opts && opts.headers),
+    },
+  });
+}
+
+let polling = false;
+async function refreshPrices() {
+  if (polling) return;
+  const token = getToken();
+  if (!token) return;
+
+  const btn = $('refreshBtn');
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  setStatus('GitHub Actions 실행 요청 중…');
+
+  try {
+    const dispatchUrl = \`https://api.github.com/repos/\${GH_REPO}/actions/workflows/\${GH_WORKFLOW}/dispatches\`;
+    const res = await ghFetch(dispatchUrl, { method: 'POST', body: JSON.stringify({ ref: 'main' }) });
+    if (res.status === 401 || res.status === 403) {
+      localStorage.removeItem(GH_TOKEN_KEY);
+      setStatus('토큰이 거부됐습니다(권한 부족/만료). 다시 시도하면 토큰을 새로 입력합니다.', 'err');
+      btn.disabled = false; btn.classList.remove('spinning');
+      return;
+    }
+    if (res.status !== 204) {
+      setStatus('실행 요청 실패 (' + res.status + '). 잠시 후 다시 시도하세요.', 'err');
+      btn.disabled = false; btn.classList.remove('spinning');
+      return;
+    }
+
+    setStatus('✓ 갱신 시작됨. 가격을 다시 긁는 중… (3~5분 소요, 이 창을 열어두세요)');
+    polling = true;
+    pollRun(Date.now());
+  } catch (e) {
+    setStatus('네트워크 오류: ' + e.message, 'err');
+    btn.disabled = false; btn.classList.remove('spinning');
+  }
+}
+
+async function pollRun(startedAt, tries = 0) {
+  if (tries > 40) { // 약 10분 한도
+    setStatus('시간 초과. <a href="https://github.com/' + GH_REPO + '/actions" target="_blank">Actions에서 직접 확인</a>', 'err');
+    $('refreshBtn').disabled = false; $('refreshBtn').classList.remove('spinning');
+    polling = false;
+    return;
+  }
+  try {
+    const runsUrl = \`https://api.github.com/repos/\${GH_REPO}/actions/runs?per_page=3\`;
+    const res = await ghFetch(runsUrl);
+    const data = await res.json();
+    const run = (data.workflow_runs || [])[0];
+    if (run) {
+      if (run.status === 'completed') {
+        if (run.conclusion === 'success') {
+          setStatus('✓ 재생성 완료! Pages 반영까지 1~2분 후 자동 새로고침합니다…', 'ok');
+          setTimeout(() => location.reload(true), 90000);
+        } else {
+          setStatus('워크플로우 실패(' + run.conclusion + '). <a href="' + run.html_url + '" target="_blank">로그 보기</a>', 'err');
+          $('refreshBtn').disabled = false; $('refreshBtn').classList.remove('spinning');
+        }
+        polling = false;
+        return;
+      } else {
+        const mins = Math.floor((Date.now() - startedAt) / 60000);
+        const secs = Math.floor(((Date.now() - startedAt) % 60000) / 1000);
+        setStatus(\`⏳ 진행 중 (\${run.status}) — \${mins}분 \${secs}초 경과…\`);
+      }
+    }
+  } catch {}
+  setTimeout(() => pollRun(startedAt, tries + 1), 15000);
+}
+
+$('refreshBtn').addEventListener('click', refreshPrices);
 
 initBenefitSelect();
 initDragScroll();
